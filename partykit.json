@@ -1,0 +1,6 @@
+{
+  "$schema": "./node_modules/partykit/schema.json",
+  "name": "there-will-be-bots",
+  "main": "party/index.ts",
+  "compatibilityDate": "2025-03-25"
+}
