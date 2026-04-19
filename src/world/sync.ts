@@ -105,20 +105,54 @@ function findCompanyIdFromAlias(value: string, source: 'aa' | 'arena') {
   return null
 }
 
-function parseModelNameFromAaRow(rowText: string, companyName: string) {
-  const companyIndex = rowText.indexOf(companyName)
-  if (companyIndex === -1) {
-    return rowText
-  }
+// AA rows render as a fixed schema:
+//   <Model Name>  <Context Window>  <Creator>  <Intelligence Score>  …
+// The context window always looks like `128k`, `1M`, `32.8k`, `1.05M`.
+// We anchor the parse on that token so the *creator* column (and nothing else)
+// decides which bot owns the row. This kills two classes of bugs:
+//   1. Bots attributed by stray text elsewhere in the row (e.g. a row
+//      produced by NVIDIA that contains "Llama" ending up under Meta).
+//   2. DeepSeek's "DeepSeek V3.2 128k DeepSeek …" rows producing an empty
+//      model name because the old parser split at the first occurrence of
+//      the company alias (position 0) and took everything before it.
+// Context window units on AA are always `k` or `M` (tokens in thousands/millions).
+// We deliberately do NOT accept `B` — that suffix appears in model names
+// (e.g. "Gemma 4 31B" = 31 billion params) and would cause the parser to
+// split the row at the parameter count instead of the context window.
+const AA_ROW_PATTERN = /^(.+?)\s+(\d+(?:\.\d+)?[kKmM])\s+(.+?)\s+(\d+(?:\.\d+)?)(?:\s|$)/
 
-  const beforeCompany = rowText.slice(0, companyIndex).trim()
-  const words = beforeCompany.split(/\s+/)
-  const lastWord = words.at(-1) ?? ''
-  if (/^(\d+(\.\d+)?)(k|m|b)?$/i.test(lastWord)) {
-    words.pop()
-  }
+function parseArtificialAnalysisRow(rowText: string): {
+  modelName: string
+  creator: string
+  score: number | null
+} | null {
+  const match = rowText.match(AA_ROW_PATTERN)
+  if (!match) return null
 
-  return words.join(' ').trim()
+  const [, modelName, , creator, scoreRaw] = match
+  return {
+    modelName: modelName.trim(),
+    creator: creator.trim(),
+    score: Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null,
+  }
+}
+
+function matchCompanyByCreator(creator: string) {
+  const lower = creator.toLowerCase()
+  for (const company of COMPANY_BOTS) {
+    if (company.sourceAliases.some((alias) => lower === alias.toLowerCase())) {
+      return company.id
+    }
+  }
+  // Permit a looser contains-match only when the creator column is a
+  // multi-word label that wraps the alias, e.g. "Microsoft Azure" vs the
+  // aliases `Microsoft Azure` / `Microsoft AI`.
+  for (const company of COMPANY_BOTS) {
+    if (company.sourceAliases.some((alias) => lower.includes(alias.toLowerCase()))) {
+      return company.id
+    }
+  }
+  return null
 }
 
 function parseArtificialAnalysisRows(html: string): ParsedLeaderboardRow[] {
@@ -131,28 +165,23 @@ function parseArtificialAnalysisRows(html: string): ParsedLeaderboardRow[] {
       continue
     }
 
-    const companyId = findCompanyIdFromAlias(rowText, 'aa')
-    if (!companyId) {
-      continue
-    }
+    const parsed = parseArtificialAnalysisRow(rowText)
+    if (!parsed) continue
+
+    const companyId = matchCompanyByCreator(parsed.creator)
+    if (!companyId) continue
 
     const company = getCompanyById(companyId)
-    if (!company) {
-      continue
-    }
+    if (!company) continue
 
-    const companyName =
-      company.sourceAliases.find((alias) => rowText.includes(alias)) ?? company.name
-    const modelName = parseModelNameFromAaRow(rowText, companyName)
-    const scoreMatch = rowText.match(new RegExp(`${escapeRegExp(companyName)}\\s+(\\d+(?:\\.\\d+)?)`))
-    const score = scoreMatch ? Number(scoreMatch[1]) : null
+    if (!parsed.modelName) continue
 
     parsedRows.push({
       companyId,
       companyName: company.name,
       rank: index,
-      score,
-      modelName,
+      score: parsed.score,
+      modelName: parsed.modelName,
       url: 'https://artificialanalysis.ai/leaderboards/models/',
     })
   }

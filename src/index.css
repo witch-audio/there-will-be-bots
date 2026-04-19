@@ -86,7 +86,7 @@ html, body, #root {
 }
 
 .ticker-text {
-  animation: ticker-scroll 120s linear infinite;
+  animation: ticker-scroll 300s linear infinite;
 }
 
 /* Pulsing server farm */

@@ -1291,19 +1291,46 @@ export default class BotWorldServer implements Party.Server {
 
   private buildPlayerProducts(signal: WorldSnapshot['companies'][number] | null) {
     const catalog = this.worldSnapshot?.productCatalog ?? []
-    if (catalog.length > 0) {
-      return catalog
+
+    // Bots represent a specific company. They must only be able to launch
+    // products tied to THEIR company — otherwise a bot picks the first
+    // unlocked product from the shared catalog (which can belong to a rival)
+    // and the game prints a bogus headline like
+    // "Anthropic launched Gemma 4 31B" (Gemma is Google's model).
+    if (signal) {
+      const ownCatalogEntries = catalog.filter((product) =>
+        product.id.startsWith(`${signal.id}-launch-`),
+      )
+      if (ownCatalogEntries.length > 0) {
+        return ownCatalogEntries
+      }
+
+      if (signal.recentLaunches.length) {
+        return signal.recentLaunches.map((launch, index) => ({
+          id: `${signal.id}-launch-${index}`,
+          name: launch,
+          description: `${signal.name} is active in the current live race window.`,
+          cost: 900 + index * 350,
+          revenuePerTick: 6 + index * 2,
+          opinionEffect: 4,
+        }))
+      }
+
+      return [
+        {
+          id: `${signal.id}-fallback-window`,
+          name: `${signal.name} Frontier Window`,
+          description: `${signal.name} is still in the race but has no fresh public launch this window.`,
+          cost: 1_000,
+          revenuePerTick: 8,
+          opinionEffect: 4,
+        },
+      ]
     }
 
-    if (signal?.recentLaunches.length) {
-      return signal.recentLaunches.map((launch, index) => ({
-        id: `${signal.id}-launch-${index}`,
-        name: launch,
-        description: `${signal.name} is active in the current live race window.`,
-        cost: 900 + index * 350,
-        revenuePerTick: 6 + index * 2,
-        opinionEffect: 4,
-      }))
+    // Human players (signal === null) can launch against the full catalog.
+    if (catalog.length > 0) {
+      return catalog
     }
 
     return [
