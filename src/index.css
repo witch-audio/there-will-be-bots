@@ -2,16 +2,38 @@
 @import "mapbox-gl/dist/mapbox-gl.css";
 
 @theme {
+  /* Legacy neon (kept for backward-compat; prefer market-* semantics below) */
   --color-neon-cyan: #00ffff;
   --color-neon-green: #00ff88;
   --color-neon-magenta: #ff00ff;
   --color-neon-orange: #ff6600;
   --color-neon-red: #ff3333;
-  --color-dark-bg: #0a0a1a;
-  --color-dark-panel: #111128;
-  --color-dark-card: #1a1a3a;
-  --color-dark-border: #2a2a4a;
+
+  /* Surfaces */
+  --color-dark-bg: #06070f;
+  --color-dark-panel: #0d0f1a;
+  --color-dark-card: #121524;
+  --color-dark-border: #1d2133;
+
+  /* Kalshi-style market semantics — use these going forward */
+  --color-market-up: #00d68a;     /* yes / up / winning */
+  --color-market-down: #ff4757;   /* no / down / losing */
+  --color-market-you: #3de9ff;    /* user highlight */
+  --color-market-warn: #ffb020;   /* locked / warning */
+  --color-market-leader: #ffd666; /* subtle gold for #1 */
+
+  /* Text scale */
+  --color-text-primary: #f5f7fb;
+  --color-text-secondary: #a8adc0;
+  --color-text-tertiary: #5a5f73;
+
+  /* Panels (translucent) */
+  --color-panel-bg: rgba(13, 15, 26, 0.72);
+  --color-panel-border: rgba(255, 255, 255, 0.06);
+  --color-panel-hairline: rgba(255, 255, 255, 0.04);
+
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 * {
@@ -24,9 +46,37 @@ html, body, #root {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #0a0a1a;
+  background: var(--color-dark-bg);
+  font-family: var(--font-display);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.font-mono, .tabular-nums {
   font-family: var(--font-mono);
-  color: #e0e0ff;
+}
+
+/* Reusable Kalshi-ish panel chrome: translucent, hairline border, blurred backdrop */
+.panel {
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-panel-border);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+}
+
+.panel-hairline {
+  border: 1px solid var(--color-panel-hairline);
+}
+
+/* Subtle live pulse for "● LIVE" dot */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+.live-dot {
+  animation: live-pulse 1.6s ease-in-out infinite;
 }
 
 /* News ticker animation */
@@ -224,6 +274,27 @@ html, body, #root {
   text-shadow:
     0 0 24px rgba(0, 255, 255, 0.16),
     0 0 34px rgba(255, 0, 255, 0.12);
+}
+
+.mapboxgl-popup {
+  z-index: 30;
+}
+
+.mapboxgl-popup-content {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+.mapboxgl-popup-tip {
+  border-top-color: var(--color-dark-panel) !important;
+}
+
+.mapboxgl-popup-close-button {
+  color: white;
+  font-size: 1rem;
+  right: 0.4rem;
+  top: 0.15rem;
 }
 
 @media (min-width: 640px) {

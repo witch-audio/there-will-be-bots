@@ -10,3 +10,24 @@ Original prompt: i want to have them fight on the same world all at once. leader
 - Reworked the foreground again using stronger art direction: removed the chunky modal feel, turned it into a cleaner poster-like center stack, and rebuilt the input/button area as a simpler action tray.
 - Fixed gameplay map movement: the intro screen was leaving the map in a non-interactive state, so GameMap now explicitly enables drag/zoom controls when play starts and disables them again on the intro screen.
 - Added Netlify deployment config and clearer production steps. Current blocker for live deploy is account auth: this machine is not logged into Netlify or PartyKit yet.
+- New goal: turn the shared economy race into a busier boardroom war with direct actions, city powers, live contracts, choice-based chaos events, and always-on company bots.
+- Implementation plan for this pass:
+  1. Extend the PartyKit snapshot/contracts so players can target rivals, respond to events, and see live contract state.
+  2. Seed fixed AI companies (OpenAI, Google, Microsoft, Anthropic, Meta, Amazon) that keep playing every round.
+  3. Add frontend panels for actions, contracts, and chaos choices, then retune the start screen around the company-battle theme.
+- Implemented the new PartyKit loop:
+  - seeded six always-on company bots with different strategies and taglines
+  - added executive actions (DDoS, smear, poach, shield)
+  - added live contracts with short-term rewards and momentum buffs
+  - changed chaos events from auto-rolls into timed choices per player
+  - made city specialties matter through launch, ops, funding, scaling, policy, and cooling bonuses
+- Implemented the frontend pass:
+  - new live contract card
+  - new control-room panel for rival actions
+  - new chaos-response modal for timed event choices
+  - standings now clearly show bots vs humans and company flavor text
+  - start screen now frames the room as a live war against real company bots
+- Verification:
+  - `npm run build` passed
+  - `npm run lint` passed
+  - browser checks with Playwright + SwiftShader verified bots moving, contracts updating, farms building, control-room actions, and chaos-choice UI rendering

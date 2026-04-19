@@ -8,8 +8,20 @@ import {
   type MultiplayerPlayer,
   type MultiplayerSnapshot,
   type ServerMessage,
+  type UserState,
 } from '../multiplayer/contracts'
-import type { GamePhase, Toast } from '../types'
+import type { Toast } from '../types'
+import type {
+  Draft,
+  HumanLeaderboardEntry,
+  LabSentimentAggregate,
+  PredictionMarket,
+  Season,
+  SentimentValue,
+  UserPrediction,
+  UserProfile,
+  UserSentiment,
+} from '../types/game'
 import { generateId } from '../utils/formatters'
 
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error'
@@ -17,91 +29,66 @@ type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error'
 interface GameStore {
   connectionStatus: ConnectionStatus
   partyHost: string
-  playerId: string
-  playerName: string
-  pendingName: string
-  localPlayer: MultiplayerPlayer | null
+  spectatorId: string
   players: MultiplayerPlayer[]
-  otherPlayers: MultiplayerPlayer[]
   leaderboard: LeaderboardEntry[]
   headlines: string[]
   toasts: Toast[]
   tick: number
   roomPhase: MultiplayerSnapshot['phase']
-  winnerId: string | null
-  gamePhase: GamePhase
+  worldSnapshotMeta: MultiplayerSnapshot['worldSnapshotMeta']
+  season: Season | null
+  openMarkets: PredictionMarket[]
+  resolvedMarkets: PredictionMarket[]
+  sentimentByLab: Record<string, LabSentimentAggregate>
+  humanLeaderboard: HumanLeaderboardEntry[]
+  userProfile: UserProfile | null
+  userDraft: Draft | null
+  userPredictions: UserPrediction[]
+  userSentiment: Record<string, UserSentiment>
+  userRank: number | null
   error: string | null
-  setPendingName: (name: string) => void
   connectPlayer: () => void
-  placeServerFarm: (cityId: string) => void
-  launchProduct: (productId: string) => void
-  submitScore: (name: string) => void
-  resetMatch: () => void
   removeToast: (id: string) => void
+  draftLab: (labId: string) => void
+  swapLab: (labId: string) => void
+  predict: (marketId: string, optionId: string) => void
+  setSentiment: (labId: string, value: SentimentValue) => void
+  setDisplayName: (name: string) => void
 }
 
-const PLAYER_ID_STORAGE_KEY = 'there-will-be-bots.player-id'
-const PLAYER_NAME_STORAGE_KEY = 'there-will-be-bots.player-name'
+const SPECTATOR_ID_STORAGE_KEY = 'agigame.spectator-id'
 
 let socket: PartySocket | null = null
 
-function loadStoredPlayerId() {
+function loadSpectatorId() {
   if (typeof window === 'undefined') {
-    return 'local-player'
+    return `spectator-${Math.random().toString(36).slice(2, 9)}`
   }
-
-  const existing = window.localStorage.getItem(PLAYER_ID_STORAGE_KEY)
+  const existing = window.localStorage.getItem(SPECTATOR_ID_STORAGE_KEY)
   if (existing) {
     return existing
   }
-
-  const created = generateId()
-  window.localStorage.setItem(PLAYER_ID_STORAGE_KEY, created)
+  const created = `spectator-${generateId()}`
+  window.localStorage.setItem(SPECTATOR_ID_STORAGE_KEY, created)
   return created
 }
 
-function loadStoredPlayerName() {
-  if (typeof window === 'undefined') {
-    return ''
-  }
-
-  return window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? ''
-}
-
-function savePlayerName(name: string) {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name)
-}
-
-function sanitizePlayerName(name: string) {
-  return name.trim().replace(/\s+/g, ' ').slice(0, 18)
-}
-
 function getPartyHost() {
-  return import.meta.env.VITE_PARTYKIT_HOST ?? 'localhost:1999'
-}
-
-function deriveGamePhase(
-  roomPhase: MultiplayerSnapshot['phase'],
-  localPlayer: MultiplayerPlayer | null,
-): GamePhase {
-  if (!localPlayer) {
-    return 'start'
+  if (import.meta.env.VITE_PARTYKIT_HOST) {
+    return import.meta.env.VITE_PARTYKIT_HOST
   }
-
-  if (roomPhase === 'finished') {
-    return localPlayer.status === 'won' ? 'won' : 'lost'
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    return `${window.location.hostname}:1999`
   }
-
-  return 'playing'
+  return '127.0.0.1:1999'
 }
 
 function sortPlayers(players: MultiplayerPlayer[]) {
   return [...players].sort(
-    (left, right) => right.resources.computePower - left.resources.computePower,
+    (left, right) =>
+      (right.sourceBackedStats.agiScore ?? 0) -
+      (left.sourceBackedStats.agiScore ?? 0),
   )
 }
 
@@ -118,72 +105,63 @@ function makeLocalToast(message: string, type: Toast['type']): Toast {
   }
 }
 
-function applySnapshot(
-  snapshot: MultiplayerSnapshot,
-  playerId: string,
-  previousName: string,
-) {
-  const players = sortPlayers(snapshot.players)
-  const localPlayer = players.find((player) => player.id === playerId) ?? null
-
+function applySnapshot(snapshot: MultiplayerSnapshot) {
   return {
-    players,
-    otherPlayers: players.filter((player) => player.id !== playerId),
-    localPlayer,
+    players: sortPlayers(snapshot.players),
     leaderboard: snapshot.leaderboard,
     headlines: snapshot.headlines,
     tick: snapshot.tick,
     roomPhase: snapshot.phase,
-    winnerId: snapshot.winnerId,
-    gamePhase: deriveGamePhase(snapshot.phase, localPlayer),
-    playerName: localPlayer?.name ?? previousName,
-    pendingName: localPlayer?.name ?? previousName,
+    worldSnapshotMeta: snapshot.worldSnapshotMeta,
+    season: snapshot.season,
+    openMarkets: snapshot.openMarkets,
+    resolvedMarkets: snapshot.resolvedMarkets,
+    sentimentByLab: snapshot.sentimentByLab,
+    humanLeaderboard: snapshot.humanLeaderboard,
   }
 }
 
-function sendMessage(message: ClientMessage) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    useGameStore.setState((state) => ({
-      toasts: pushToast(
-        state.toasts,
-        makeLocalToast('Not connected to the shared world yet.', 'warning'),
-      ),
-    }))
-    return
+function applyUserState(userState: UserState) {
+  return {
+    userProfile: userState.userProfile,
+    userDraft: userState.userDraft,
+    userPredictions: userState.userPredictions,
+    userSentiment: userState.userSentiment,
+    userRank: userState.userRank,
   }
+}
 
+function sendClientMessage(message: ClientMessage) {
+  if (!socket) return
   socket.send(JSON.stringify(message))
 }
 
-const initialPlayerId = loadStoredPlayerId()
-const initialPlayerName = loadStoredPlayerName()
+const initialSpectatorId = loadSpectatorId()
 
-export const useGameStore = create<GameStore>((set, get) => ({
+export const useGameStore = create<GameStore>((set) => ({
   connectionStatus: 'idle',
   partyHost: getPartyHost(),
-  playerId: initialPlayerId,
-  playerName: initialPlayerName,
-  pendingName: initialPlayerName,
-  localPlayer: null,
+  spectatorId: initialSpectatorId,
   players: [],
-  otherPlayers: [],
   leaderboard: [],
   headlines: [],
   toasts: [],
   tick: 0,
   roomPhase: 'waiting',
-  winnerId: null,
-  gamePhase: 'start',
+  worldSnapshotMeta: null,
+  season: null,
+  openMarkets: [],
+  resolvedMarkets: [],
+  sentimentByLab: {},
+  humanLeaderboard: [],
+  userProfile: null,
+  userDraft: null,
+  userPredictions: [],
+  userSentiment: {},
+  userRank: null,
   error: null,
 
-  setPendingName: (name) => set({ pendingName: name }),
-
   connectPlayer: () => {
-    const state = get()
-    const nextName = sanitizePlayerName(state.pendingName) || `CEO-${state.playerId.slice(0, 4)}`
-
-    savePlayerName(nextName)
-
     if (socket) {
       socket.close()
       socket = null
@@ -192,34 +170,26 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({
       connectionStatus: 'connecting',
       error: null,
-      playerName: nextName,
-      pendingName: nextName,
-      toasts: [],
     })
 
     const nextSocket = new PartySocket({
-      host: state.partyHost,
+      host: getPartyHost(),
       room: PARTYKIT_ROOM_ID,
       query: async () => ({
-        playerId: state.playerId,
-        name: nextName,
+        playerId: initialSpectatorId,
+        name: 'Spectator',
       }),
     })
 
     socket = nextSocket
 
     nextSocket.addEventListener('open', () => {
-      if (socket !== nextSocket) {
-        return
-      }
-
+      if (socket !== nextSocket) return
       set({ connectionStatus: 'connected', error: null })
     })
 
     nextSocket.addEventListener('message', (event) => {
-      if (socket !== nextSocket || typeof event.data !== 'string') {
-        return
-      }
+      if (socket !== nextSocket || typeof event.data !== 'string') return
 
       let payload: ServerMessage
       try {
@@ -241,77 +211,44 @@ export const useGameStore = create<GameStore>((set, get) => ({
         return
       }
 
-      set((current) => ({
+      if (payload.type === 'user-state') {
+        set(() => applyUserState(payload.userState))
+        return
+      }
+
+      set(() => ({
         connectionStatus: 'connected',
         error: null,
-        ...applySnapshot(payload.snapshot, current.playerId, current.playerName),
+        ...applySnapshot(payload.snapshot),
       }))
     })
 
     nextSocket.addEventListener('close', () => {
-      if (socket !== nextSocket) {
-        return
-      }
-
-      set((current) => ({
-        connectionStatus: current.localPlayer ? 'connecting' : 'idle',
-        error: current.localPlayer ? 'Trying to reconnect to the shared world.' : null,
-        toasts: current.localPlayer
-          ? pushToast(
-              current.toasts,
-              makeLocalToast('Connection dropped. Trying again.', 'warning'),
-            )
-          : current.toasts,
-      }))
+      if (socket !== nextSocket) return
+      set({
+        connectionStatus: 'connecting',
+        error: 'Trying to reconnect to the live room.',
+      })
     })
 
     nextSocket.addEventListener('error', () => {
-      if (socket !== nextSocket) {
-        return
-      }
-
-      set((current) => ({
+      if (socket !== nextSocket) return
+      set({
         connectionStatus: 'error',
-        error: 'Could not reach the PartyKit room.',
-        toasts: pushToast(
-          current.toasts,
-          makeLocalToast('Could not reach the PartyKit room.', 'warning'),
-        ),
-      }))
+        error: 'Could not reach the live room.',
+      })
     })
-  },
-
-  placeServerFarm: (cityId) => {
-    sendMessage({
-      type: 'build-farm',
-      cityId,
-    })
-  },
-
-  launchProduct: (productId) => {
-    sendMessage({
-      type: 'launch-product',
-      productId,
-    })
-  },
-
-  submitScore: (name) => {
-    const finalName = sanitizePlayerName(name || get().playerName)
-    if (finalName) {
-      savePlayerName(finalName)
-      set({ playerName: finalName, pendingName: finalName })
-    }
-
-    sendMessage({
-      type: 'submit-score',
-      name: finalName,
-    })
-  },
-
-  resetMatch: () => {
-    sendMessage({ type: 'reset-match' })
   },
 
   removeToast: (id) =>
     set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
+
+  draftLab: (labId) => sendClientMessage({ type: 'draft-lab', labId }),
+  swapLab: (labId) => sendClientMessage({ type: 'swap-lab', labId }),
+  predict: (marketId, optionId) =>
+    sendClientMessage({ type: 'predict', marketId, optionId }),
+  setSentiment: (labId, value) =>
+    sendClientMessage({ type: 'set-sentiment', labId, value }),
+  setDisplayName: (name) =>
+    sendClientMessage({ type: 'set-display-name', name }),
 }))
