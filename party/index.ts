@@ -5,11 +5,13 @@ import { COMPANY_BOTS } from '../src/data/companies'
 import { GAME_CONFIG } from '../src/data/config'
 import {
   LEADERBOARD_STORAGE_KEY,
+  SENTIMENT_SNAPSHOT_STORAGE_KEY,
   WORLD_SNAPSHOT_STORAGE_KEY,
   type ClientMessage,
   type LeaderboardEntry,
   type MultiplayerPlayer,
   type MultiplayerSnapshot,
+  type SentimentBroadcast,
   type ServerMessage,
   type UserState,
 } from '../src/multiplayer/contracts'
@@ -55,6 +57,7 @@ import type {
 import { generateId } from '../src/utils/formatters'
 import { computeTrend } from '../src/utils/agiScore'
 import { buildWorldSnapshot } from '../src/world/sync'
+import { buildSentimentSnapshot } from '../src/world/sentimentSync'
 
 type ConnectionState = {
   playerId: string
@@ -133,6 +136,8 @@ export default class BotWorldServer implements Party.Server {
   private worldSnapshot: WorldSnapshot | null = null
   private worldContractTemplates: WorldContractTemplate[] = []
   private syncPromise: Promise<void> | null = null
+  private aiSentiment: SentimentBroadcast | null = null
+  private sentimentSyncPromise: Promise<void> | null = null
   private deliveredEventIds = new Set<string>()
   private profiles = new Map<string, UserProfile>()
   private seasons: Season[] = []
@@ -152,11 +157,15 @@ export default class BotWorldServer implements Party.Server {
       await this.room.storage.get<LeaderboardEntry[]>(LEADERBOARD_STORAGE_KEY)
     const storedWorldSnapshot =
       await this.room.storage.get<WorldSnapshot>(WORLD_SNAPSHOT_STORAGE_KEY)
+    const storedAiSentiment =
+      await this.room.storage.get<SentimentBroadcast>(SENTIMENT_SNAPSHOT_STORAGE_KEY)
 
     this.leaderboard = storedLeaderboard ?? []
     this.worldSnapshot = storedWorldSnapshot ?? null
+    this.aiSentiment = storedAiSentiment ?? null
     await this.loadGameLayers()
     await this.ensureWorldSnapshotFresh('startup')
+    void this.ensureAiSentimentFresh('startup')
     this.ensureCompanyBots()
     this.ensureActiveSeason()
     this.seedOpenMarketsIfNeeded()
@@ -176,6 +185,7 @@ export default class BotWorldServer implements Party.Server {
     connection.setState({ playerId })
 
     await this.ensureWorldSnapshotFresh('connect')
+    void this.ensureAiSentimentFresh('connect')
     this.ensureCompanyBots()
 
     const existingPlayer = this.players.get(playerId)
@@ -325,6 +335,7 @@ export default class BotWorldServer implements Party.Server {
 
   private advanceTick() {
     void this.ensureWorldSnapshotFresh('tick')
+    void this.ensureAiSentimentFresh('tick')
 
     if (this.phase === 'finished') {
       if (this.resetAt && Date.now() >= this.resetAt) {
@@ -1455,6 +1466,44 @@ export default class BotWorldServer implements Party.Server {
     await this.syncPromise
   }
 
+  // Refresh GDELT-derived per-country AI sentiment. This runs on the server so
+  // every client gets the same result from one set of fetches, and GDELT's
+  // per-IP throttle applies to one caller instead of every connected player.
+  private async ensureAiSentimentFresh(reason: 'startup' | 'connect' | 'tick') {
+    const SENTIMENT_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours — GDELT is rate-limited per IP
+    const nextSyncAt = (this.aiSentiment?.fetchedAt ?? 0) + SENTIMENT_TTL_MS
+    if (this.aiSentiment && Date.now() < nextSyncAt && reason !== 'startup') {
+      return
+    }
+
+    if (this.sentimentSyncPromise) {
+      return
+    }
+
+    this.sentimentSyncPromise = (async () => {
+      try {
+        const next = await buildSentimentSnapshot(fetch, Date.now())
+        // Only persist if we got meaningful coverage (>=50% of tracked set).
+        // Otherwise keep the previous snapshot so a transient 429 doesn't blank
+        // the globe for every connected spectator.
+        if (next.hitCount >= Math.ceil(next.trackedCount / 2)) {
+          this.aiSentiment = next
+          await this.room.storage.put(SENTIMENT_SNAPSHOT_STORAGE_KEY, next)
+          this.broadcastSnapshot()
+        } else if (!this.aiSentiment) {
+          // First sync failed hard — still persist the empty result so the
+          // client can render its static fallback without flickering.
+          this.aiSentiment = next
+          this.broadcastSnapshot()
+        }
+      } catch {
+        // Swallow — next tick will try again.
+      } finally {
+        this.sentimentSyncPromise = null
+      }
+    })()
+  }
+
   private refreshUnlockedProducts(player: MultiplayerPlayer) {
     player.products = player.products.map((product) =>
       product.unlocked || product.launched || product.cost <= player.resources.computePower * 2
@@ -1606,6 +1655,7 @@ export default class BotWorldServer implements Party.Server {
       resolvedMarkets: this.getRecentResolvedMarkets(),
       sentimentByLab: Object.fromEntries(this.sentimentAggregates),
       humanLeaderboard: this.buildHumanLeaderboardSlice(),
+      aiSentiment: this.aiSentiment,
     }
   }
 

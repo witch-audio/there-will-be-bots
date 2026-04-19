@@ -7,6 +7,7 @@ import {
   type LeaderboardEntry,
   type MultiplayerPlayer,
   type MultiplayerSnapshot,
+  type SentimentBroadcast,
   type ServerMessage,
   type UserState,
 } from '../multiplayer/contracts'
@@ -42,6 +43,7 @@ interface GameStore {
   resolvedMarkets: PredictionMarket[]
   sentimentByLab: Record<string, LabSentimentAggregate>
   humanLeaderboard: HumanLeaderboardEntry[]
+  aiSentiment: SentimentBroadcast | null
   userProfile: UserProfile | null
   userDraft: Draft | null
   userPredictions: UserPrediction[]
@@ -118,6 +120,7 @@ function applySnapshot(snapshot: MultiplayerSnapshot) {
     resolvedMarkets: snapshot.resolvedMarkets,
     sentimentByLab: snapshot.sentimentByLab,
     humanLeaderboard: snapshot.humanLeaderboard,
+    aiSentiment: snapshot.aiSentiment,
   }
 }
 
@@ -154,6 +157,7 @@ export const useGameStore = create<GameStore>((set) => ({
   resolvedMarkets: [],
   sentimentByLab: {},
   humanLeaderboard: [],
+  aiSentiment: null,
   userProfile: null,
   userDraft: null,
   userPredictions: [],

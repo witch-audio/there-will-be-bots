@@ -1,3 +1,4 @@
+import type { SentimentBucket } from '../data/aiSentiment'
 import type {
   AIProduct,
   CompanyStrategy,
@@ -27,6 +28,20 @@ import type {
 export const PARTYKIT_ROOM_ID = 'main-world'
 export const LEADERBOARD_STORAGE_KEY = 'leaderboard'
 export const WORLD_SNAPSHOT_STORAGE_KEY = 'world-snapshot'
+export const SENTIMENT_SNAPSHOT_STORAGE_KEY = 'sentiment-snapshot:v1'
+
+export interface CountrySentiment {
+  tone: number
+  bucket: SentimentBucket
+  sampleSize: number
+}
+
+export interface SentimentBroadcast {
+  byCountry: Record<string, CountrySentiment>
+  fetchedAt: number
+  hitCount: number
+  trackedCount: number
+}
 
 export interface MultiplayerPlayer {
   id: string
@@ -74,6 +89,7 @@ export interface MultiplayerSnapshot {
   resolvedMarkets: PredictionMarket[]
   sentimentByLab: Record<string, LabSentimentAggregate>
   humanLeaderboard: HumanLeaderboardEntry[]
+  aiSentiment: SentimentBroadcast | null
 }
 
 export interface UserState {

@@ -1,13 +1,42 @@
-# There Will Be Bots
+# agigame.live
 
-Shared-world multiplayer browser game built with React, Vite, Mapbox, and PartyKit.
+Real-time browser game tracking the live AI race. Players join a shared world where AI company bots are already competing — built with React, Vite, Mapbox, and PartyKit.
 
-## What changed
+## What the game is
 
-- One PartyKit room now owns the live match.
-- Everyone joins the same world at the same time.
-- The match state is shared live across players.
-- The leaderboard is the only thing that persists after a run ends.
+You are a human wildcard dropped into a live AI race against real company bots:
+
+- OpenAI, Google, Anthropic, xAI, Meta, DeepSeek, Alibaba, Microsoft
+
+The bots, headlines, contracts, and live briefings are derived from a **world snapshot** built from public AI race signals:
+
+- Artificial Analysis leaderboard
+- Arena leaderboard
+- Official company news / blog pages
+
+The snapshot updates every ~12 hours. The game is not random chaos — it reflects real signals.
+
+## Game loop
+
+Every second, the PartyKit server advances one tick:
+
+- Farms and launched products generate compute
+- Opinion can boost or hurt income
+- Status effects tick down
+- Bots decide to build, launch, shield, or attack
+- Live contract progress updates
+- Win condition checks for `20,000` compute
+
+First bot or human to hit the threshold ends the round.
+
+## New in this version
+
+- **AGI Score** — composite spectator leaderboard tracking each lab's real-world lead
+- **Prediction markets** — Kalshi-style panels with odds %, translucent UI, terminal bar
+- **Draft / swap** — pick and swap your position before the round starts
+- **Seasons** — persistent season structure across rounds
+- **Human leaderboard** — separate leaderboard for human players
+- **Real-world sync** — game state seeded from live AI race data, not fake RNG
 
 ## Local setup
 
@@ -40,7 +69,7 @@ Shared-world multiplayer browser game built with React, Vite, Mapbox, and PartyK
 ## Local multiplayer testing
 
 - Use separate browser profiles or a private window for the second player.
-- Tabs in the same profile share local storage, so they will reuse the same saved player id by default.
+- Tabs in the same profile share local storage and will reuse the same saved player id.
 
 ## Environment variables
 
@@ -53,12 +82,12 @@ Shared-world multiplayer browser game built with React, Vite, Mapbox, and PartyK
 
 ### Frontend
 
-Deploy the Vite site to Netlify. This repo now includes a [netlify.toml](/Users/rachellarralde/Developer/there-will-be-bots/netlify.toml) file, so Netlify will use:
+Deploy the Vite site to Netlify. The repo includes a `netlify.toml`, so Netlify will use:
 
 - Build command: `npm run build`
 - Publish directory: `dist`
 
-Set these frontend environment variables in Netlify before the production deploy:
+Set these environment variables in Netlify before the production deploy:
 
 - `VITE_MAPBOX_TOKEN`
 - `VITE_PARTYKIT_HOST`
@@ -73,7 +102,7 @@ npm run deploy:party
 
 On first deploy, PartyKit will give you a production host in the format:
 
-```text
+```
 <project-name>.<your-account>.partykit.dev
 ```
 
@@ -124,4 +153,15 @@ Use that value as `VITE_PARTYKIT_HOST` in Netlify.
    npm run deploy:netlify
    ```
 
-The shared room id is still `main-world`, so every player lands in the same live match.
+The shared room id is `main-world` — every player lands in the same live match.
+
+## Key files
+
+| File | Purpose |
+|---|---|
+| `party/index.ts` | PartyKit server — match authority, bot AI, tick loop, win condition |
+| `src/world/sync.ts` | Real-world sync — fetches AI leaderboards, maps signals into game state |
+| `src/multiplayer/contracts.ts` | Shared type contract between server and client |
+| `src/store/index.ts` | Zustand client store, auto-connects to PartyKit |
+| `src/map/GameMap.tsx` | Mapbox globe, city markers, farm markers |
+| `CLAUDE_UI_HANDOFF.md` | Full UI context for working on this codebase |
